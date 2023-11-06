@@ -1,0 +1,267 @@
+/**
+ * Este script em JavaScript para o Google Apps Script utiliza a API da OpenAI (ChatGPT, modelo GPT-4)
+ * para a elaboração automatizada de minutas jurídicas, visando auxiliar operadores do direito na automação de documentos.
+ * Este exemplo trabalha com a criação de uma denúncia criminal para o Ministério Público, mas pode
+ * ser adaptado para petições iniciais de advogados, elaboração automatizada de minutas de sentenças,
+ * decisões interlocutórias e outros documentos jurídicos relevantes para promotores, defensores, advogados e juízes.
+ * Desenvolvido por Claudio Angelo C. Gonzaga (https://sites.google.com/view/promotornatural)
+ * 
+ * Licença: MIT
+ * 
+ * Direitos autorais 2014 Mikko Ohtamaa, http://opensourcehacker.com
+ */
+
+function onOpen() {
+    var menuGerarMinuta = [
+                           {name: "Estagiário ChatGPT-4",functionName: "coletar_dados_processo"}
+                          ];                    
+   ss.addMenu("PARQUET", menuGerarMinuta);
+ }
+
+//var doc_template_id = "1tyqZex0lxs7pMEsdTnXcyXqgmg_wg7HGYHw839HF5Bk";
+// ID do seu documento do Google que será duplicado (com a formatação, cabeçalho, etc.)
+var doc_template_id = "1D9lUAgoXJY7oDS8gUrPWLB59s1VZtoMFcpDQSqVPnYg";
+
+// Dados do órgão para ser substituído
+var dados_orgao = `
+  #DADOS DO ÓRGÃO 
+  Nome do promotor: CRUZ E SOUZA
+  Vara: Vara Única
+  Comarca: LAGUNA-SC
+  Gênero do(a) juiz(a): Feminino
+  `
+// Recebe input do usuário. Ex: texto de um Boletim de Ocorrência
+function coletar_dados_processo() {
+  var ui = SpreadsheetApp.getUi();
+  var html = HtmlService.createHtmlOutput(
+    "<div style='display: flex; flex-direction: column; height: 90vh;'>" + 
+    "<input type='text' id='numero_procedimento' placeholder='Número do procedimento' style='width: 160px; margin-bottom: 10px;'>" + 
+    "<textarea id='texto_grande' style='flex-grow: 1;'></textarea>" +
+    "<div style='display: flex; justify-content: center; margin-top: 10px;'>" + 
+    "<button id='sendChatGPTButton' style='margin-right: 5px;'>Enviar</button>" +
+    "<button id='cancelButton'>Cancelar</button>" +
+    "</div>" +
+    "</div>" +
+    "<script>" +
+    "document.getElementById('sendChatGPTButton').addEventListener('click', function() {" +
+    "  var textArea = document.getElementById('texto_grande');" +
+    "  var numeroProcInput = document.getElementById('numero_procedimento');" +
+    "  var inputValue = textArea.value;" +
+    "  var numeroProc = numeroProcInput.value;" +
+    "  if (!numeroProc) {" +
+    "    alert('Por favor, insira o número do procedimento.');" +
+    "    return;" +
+    "  }" +
+    "  google.script.run.withSuccessHandler(function(response) {" +
+    "    google.script.host.close();" +
+    "    window.top.location.reload(); " +
+    "  }).withFailureHandler(function(error) {" +
+    "    console.error('Error: ' + error);" +
+    "    alert('Houve um erro: ' + error);" +
+    "  }).suaMinutaSendoProcessada(inputValue, numeroProc);" +
+    "});" +
+    "document.getElementById('cancelButton').addEventListener('click', function() {" +
+    "  google.script.host.close();" +
+    "});" +
+    "</script>"
+  ).setWidth(800).setHeight(600);
+  ui.showModalDialog(html, "Copie e cole os dados do procedimento ou processo (ex: Informações e narrativa do Boletim de Ocorrência)");
+}
+
+function suaMinutaSendoProcessada(promptText, numero_proc){
+  // Mostra um diálogo indicando que a minuta está sendo processada
+  var processingDialog = HtmlService.createHtmlOutput()
+    .setWidth(250)
+    .setHeight(100);
+  SpreadsheetApp.getUi().showModalDialog(processingDialog, 'Sua minuta está sendo processada!');
+
+  // Gera a resposta utilizando o ChatGPT
+  var response = generateResponseFromChatGPT(promptText);
+  
+  // Atualiza o diálogo para indicar que a minuta foi processada
+  processingDialog.setContent('<p>Minuta processada. Por favor, verifique o documento.</p>');
+  
+  // Supondo que `createDuplicateDocument` duplica o template e retorna um objeto de documento
+  var target = createDuplicateDocument(doc_template_id, 'nova minuta');
+  var template_source = DriveApp.getFileById(doc_template_id);
+  var template_name = template_source.getName();
+  var template_link = template_source.getUrl();
+  var doc_name = numero_proc + " " + template_name + " " + shortDate;   
+  target.setName(doc_name);
+  
+  // Insere o texto gerado no corpo do novo documento
+  var body = target.getBody();
+  body.clear(); // Limpa o conteúdo existente, se necessário
+  body.setText(response); // Insere o novo texto
+
+  // Gera o link para o novo documento
+  var link_novo_doc = target.getUrl(); 
+
+ // Se quiser fazer substituição de strings no template do Google Docs (ex: substituir texto de cabeçalho)
+ // for(var key in keysVars){
+ //   replaceString(target, "[["+key+"]]", keysVars[key]);
+ // }
+  
+  // Mostra um diálogo final com o link para o novo documento
+var successDialog = HtmlService.createHtmlOutput('<a rel="noreferrer noopener" href="' + link_novo_doc + '" target="_blank">Link para a minuta gerada</a><br><br><a rel="noreferrer noopener" href="' + template_link + '" target="_blank">Editar o modelo desta minuta</a>')
+    .setWidth(250)
+    .setHeight(150);
+  SpreadsheetApp.getUi().showModalDialog(successDialog, 'Minuta gerada com sucesso!');
+
+var cell_numero = activeSheet.getRange(activeRow, getColumnNrByName(activeSheet,'NUMERO') + 1);
+cell_numero.setValue(numero_proc);
+
+var cell_link_ato_ai = activeSheet.getRange(activeRow, getColumnNrByName(activeSheet,'LINK_ATO_AI') + 1);
+cell_link_ato_ai.setValue(link_novo_doc);
+
+}
+
+
+function getOpenAIKey() {
+  // O número da chave está nas propriedades do Script
+  var scriptProperties = PropertiesService.getScriptProperties();
+  return scriptProperties.getProperty('OPENAI_KEY');
+}
+
+template_denuncia = `
+
+EXCELENTÍSSIMO(A) SENHOR(A) DOUTOR(A) JUIZ(ÍZA) DA  [[VARA]] DA COMARCA DE [[COMARCA]]
+
+AUTOS CÓD. N: [[CODIGO]]
+REQUERIDO: [[REQUERIDO]]
+
+
+O MINISTÉRIO PÚBLICO DO ESTADO DE MATO GROSSO, com fundamento nas normas constitucionais e legais vigentes e nos elementos colhidos no  procedimento investigatório em epígrafe, vem à presença de Vossa Excelência oferecer
+
+                                                 DENÚNCIA
+em desfavor de
+
+[[REQUERIDO]], [[Nacionalidade]], nascido aos [[Data de nascimento]], natural de [[Cidade e Estado do nascimento]], inscrito no CPF n° [[Número do CPF]], portador do RG n° [[Número do RG]], filho de [[Nome da mãe e do pai]], residente e domiciliado na [[endereço de residência]], município de Itiquira/MT, telefone [[Número de telefone]] ;
+
+pela prática, em tese, dos seguintes fatos delituosos:
+
+      1a Imputação - No dia [[DATA_FATO]], por volta de [[HORA_FATO]], na [[LOCAL_FATO]], o denunciado [[REQUERIDO]], consciente da ilicitude de sua conduta,  subtraiu mediante violência e grave ameaça, consubstanciada em [[em que consistiu a violência ou grave ameaça?]] [[objeto do crime]] pertencente à vítima [[nome da vítima]];
+      2a Imputação - Nas mesmas condições espaço-temporais descritas na imputação anterior, {se houver mais de um fato}
+
+DETALHAMENTO FÁTICO
+Segundo apurado no [[inquérito, TCO, PIC]] N. [[CODIGO]], na data e local supramencionados, {iniciar a descrição do fato, geralmente citando a versão de uma testemunha ou da narrativa do Boletim de Ocorrência}.
+
+A materialidade e autoria restam comprovadas pelo [[documento que comprova a materialidade. Ex: Termo de Apreensão]].
+
+Ante o exposto, o MINISTÉRIO PÚBLICO DO ESTADO DE MATO GROSSO, por seu promotor de Justiça signatário, denuncia [[REQUERIDO]] como incurso nas sanções previstas no [[TIPIFICACAO]], requerendo que, recebida e autuada esta inicial, seja ele citado para responder à acusação, e, após a formação da culpa, com observância do contraditório e da ampla defesa, seja prolatada sentença penal condenatória.
+
+[[CIDADE]], [[DATA]].
+
+[[AUTOR]]
+[[CARGO]] `
+
+
+// Função para gerar uma resposta do ChatGPT usando a API da OpenAI
+function generateResponseFromChatGPT(promptText) {
+  var apiKey = getOpenAIKey();
+  var apiEndpoint = "https://api.openai.com/v1/chat/completions";
+
+  var payload = {
+    'model': "gpt-4", // Definir o modelo escolhido
+    'messages': [{
+      "role": "user",
+      "content": `
+        #OBJETIVO
+        Minute uma denúncia criminal de um promotor de Justiça, utilizando o template abaixo e as informações do fato constantes no Boletim de Ocorrência trancrito no final deste prompt: e, ainda, o contexto constante nas orientações abaixo e dados do órgão.
+        
+        #ORIENTAÇÕES
+        - Use linguagem jurídica formal;
+        - Não acrescente informações não fornecidas;
+        - Se houver mais de uma imputação, narre todas elas;
+        - Use tão fielmente quanto possível o template fornecido;
+        - Adapte o vocativo do(a) jui(íza) conforme se trate de gênero masculino ou feminino;
+        ` + 
+        `#DADOS DO ÓRGÃO: ` + dados_orgao + 
+
+       ` #TEMPLATE
+        O template é este: 
+         ` + template_denuncia + `As informações do caso concreto são estas: 
+         ` + promptText
+    }],
+    'temperature': 0.2,
+    'max_tokens': 5500
+  };
+
+  // Opções da chamada
+  var options = {
+    "method": "post",
+    "headers": {
+      "Content-Type": "application/json",
+      "Authorization": "Bearer " + apiKey
+    },
+    'muteHttpExceptions': true,
+    "payload": JSON.stringify(payload)
+  };
+  // Fazer a consulta à API
+  var response = UrlFetchApp.fetch(apiEndpoint, options);
+  var responseCode = response.getResponseCode();
+  var responseContent = response.getContentText();
+
+  // Checar se a resposta é 200
+  if (responseCode === 200) {
+    var responseJson = JSON.parse(responseContent);
+    if (responseJson.choices && responseJson.choices.length > 0 && responseJson.choices[0].message) {
+      var responseText = responseJson.choices[0].message.content;
+      Logger.log("Response Text: " + responseText);
+      return responseText;
+    } else {
+      Logger.log('No choices or message content returned from the API.');
+      throw new Error("Houve um erro ao processar a sua solicitação.");
+    }
+  } else {
+    Logger.log('API call failed with response code ' + responseCode + ': ' + responseContent);
+    throw new Error("Houve um erro ao processar a sua solicitação.");
+  }
+}
+
+ /**
+ * @desc This  testGetColumnNrByName() is an Google Apps Script for getting column number by column name
+ * @author Misha M.-Kupriyanov https://plus.google.com/104512463398531242371/
+ * @link https://gist.github.com/5520691
+ */
+
+function getColumnNrByName(sheet, name) {
+  var range = sheet.getRange(1, 1, 1, sheet.getMaxColumns());
+  var values = range.getValues();
+  for (var row in values) {
+    for (var col in values[row]) {
+      if (values[row][col] == name) {
+        return parseInt(col);
+      }
+    }
+  }
+  return false;
+}
+
+
+/**
+ * Duplicates a Google Apps doc
+ *
+ * @return a new document with a given name from the orignal
+ * Based on GoDDaMn script, wich was inspired by  the Google Script project named 'Generate Google Docs' by Mikko Ohtamaa (http://opensourcehacker.com)
+ **/
+
+function createDuplicateDocument(sourceId, name) {
+  var source = DriveApp.getFileById(sourceId);
+  var newFile = source.makeCopy(name);
+  var newFileID = newFile.getId();
+  var commentList = Drive.Comments.list(sourceId);
+  commentList.items.forEach(function(item) {
+  var replies = item.replies;
+  delete item.replies;
+  var commentId = Drive.Comments.insert(item, newFileID).commentId;
+  replies.forEach(function(reply) {
+    Drive.Replies.insert(reply, newFileID, commentId).replyId;
+    });
+  });
+  var targetFolder = DriveApp.getFolderById(atos_praticados_folder_id);
+  targetFolder.addFile(newFile);
+  var templatesFolder = DriveApp.getFolderById(meus_modelos_folder_id);
+  templatesFolder.removeFile(newFile);
+    return DocumentApp.openById(newFileID);
+}
